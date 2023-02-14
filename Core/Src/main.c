@@ -48,7 +48,7 @@
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
-ADC_HandleTypeDef hadc1;
+ ADC_HandleTypeDef hadc1;
 DMA_HandleTypeDef hdma_adc1;
 
 I2C_HandleTypeDef hi2c1;
@@ -61,6 +61,7 @@ DMA_HandleTypeDef hdma_tim2_ch1;
 
 UART_HandleTypeDef huart2;
 UART_HandleTypeDef huart3;
+DMA_HandleTypeDef hdma_usart3_rx;
 
 /* USER CODE BEGIN PV */
 uint8_t mpuData[14];
@@ -150,7 +151,7 @@ int main(void)
   HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
   HAL_TIM_Base_Start_IT(&htim1);
   HAL_ADCEx_Calibration_Start(&hadc1);
-  HAL_UART_Receive_IT(&huart3, &rxData, 1);
+  HAL_UART_Receive_DMA(&huart3, &rxData, 1);
 
   /* USER CODE END 2 */
 
@@ -579,6 +580,9 @@ static void MX_DMA_Init(void)
   /* DMA1_Channel1_IRQn interrupt configuration */
   HAL_NVIC_SetPriority(DMA1_Channel1_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(DMA1_Channel1_IRQn);
+  /* DMA1_Channel3_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Channel3_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Channel3_IRQn);
   /* DMA1_Channel5_IRQn interrupt configuration */
   HAL_NVIC_SetPriority(DMA1_Channel5_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(DMA1_Channel5_IRQn);
@@ -721,7 +725,7 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
            	//HAL_UART_Transmit(&huart2, (uint8_t*)"R\n", sizeof("R\n"), HAL_MAX_DELAY);
            	turnCounter = 0;
     	}
-        HAL_UART_Receive_IT(&huart3, &rxData, 1); // Enabling interrupt receive again
+     HAL_UART_Receive_DMA(&huart3, &rxData, 1);// Enabling interrupt receive again
   }
 }
 
