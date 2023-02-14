@@ -1,0 +1,2 @@
+../Core/Src/libs/control.c:12:5:angleRegulation	40	static
+../Core/Src/libs/control.c:35:5:speedRegulation	40	static
