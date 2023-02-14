@@ -27,6 +27,9 @@
 #include <math.h>
 #include <stdio.h>
 #include "constants.h"
+#include "libs/imu.h"
+#include "libs/control.h"
+#include "libs/motor.h"
 
 /* USER CODE END Includes */
 
@@ -45,7 +48,7 @@
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
- ADC_HandleTypeDef hadc1;
+ADC_HandleTypeDef hadc1;
 DMA_HandleTypeDef hdma_adc1;
 
 I2C_HandleTypeDef hi2c1;
@@ -53,38 +56,32 @@ DMA_HandleTypeDef hdma_i2c1_rx;
 
 TIM_HandleTypeDef htim1;
 TIM_HandleTypeDef htim2;
+TIM_HandleTypeDef htim3;
 DMA_HandleTypeDef hdma_tim2_ch1;
 
 UART_HandleTypeDef huart2;
+UART_HandleTypeDef huart3;
 
 /* USER CODE BEGIN PV */
 uint8_t mpuData[14];
-uint8_t uartMsg[25];
+uint8_t uartMsg[15];
 uint16_t adcData[3];
 uint32_t zntime;
-int pwm = 0;
-int period = 1000;
+int turn = 0;
 int speed = 0;
-int filtSpeed = 0;
-int prevSpeed = 0;
-int counter = 0;
-int counter2 = 0;
-int prevSpeedErr = 0;
-int prevAngErr = 0;
-int prevFiltAngErr = 0;
-float dt = 0.002;
+uint speedCounter = 0;
+uint adcCounter = 0;
+uint startCounter = 0;
+uint turnCounter = 0;
 int setAng = 0;
 int setSpeed = 0;
-int Ia = 0;
-int Iv = 0;
+
+int isOn = 0;
+uint8_t rxData;
 /////////////////////////////////////////////////////////
-float kp = 2.17;
-float ki = 79;
-float kd = 0.33;
-float kpv = 5.1;
-float kiv = 0.044;
-float kdv = 0.02;
-int filtAngErr, angErr, speedErr, pitch, Pa, Da, Pv, Dv;
+float kpv, kiv, kdv;
+int pitch;
+int prevSetSpeed = 0;
 //////////////////////////////////////////////////////////
 /* USER CODE END PV */
 
@@ -97,8 +94,9 @@ static void MX_TIM2_Init(void);
 static void MX_USART2_UART_Init(void);
 static void MX_TIM1_Init(void);
 static void MX_ADC1_Init(void);
+static void MX_USART3_UART_Init(void);
+static void MX_TIM3_Init(void);
 /* USER CODE BEGIN PFP */
-void InitMPU6050(void);
 
 
 /* USER CODE END PFP */
@@ -141,14 +139,18 @@ int main(void)
   MX_USART2_UART_Init();
   MX_TIM1_Init();
   MX_ADC1_Init();
+  MX_USART3_UART_Init();
+  MX_TIM3_Init();
   /* USER CODE BEGIN 2 */
 
-  InitMPU6050();
+  InitMPU6050(&hi2c1);
   HAL_TIM_IC_Start_DMA(&htim2, TIM_CHANNEL_1, (uint32_t*)&zntime, 1);
   HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_3);
   HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_2);
+  HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
   HAL_TIM_Base_Start_IT(&htim1);
   HAL_ADCEx_Calibration_Start(&hadc1);
+  HAL_UART_Receive_IT(&huart3, &rxData, 1);
 
   /* USER CODE END 2 */
 
@@ -450,6 +452,55 @@ static void MX_TIM2_Init(void)
 }
 
 /**
+  * @brief TIM3 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM3_Init(void)
+{
+
+  /* USER CODE BEGIN TIM3_Init 0 */
+
+  /* USER CODE END TIM3_Init 0 */
+
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+  TIM_OC_InitTypeDef sConfigOC = {0};
+
+  /* USER CODE BEGIN TIM3_Init 1 */
+
+  /* USER CODE END TIM3_Init 1 */
+  htim3.Instance = TIM3;
+  htim3.Init.Prescaler = 71;
+  htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim3.Init.Period = 500;
+  htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
+  if (HAL_TIM_PWM_Init(&htim3) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim3, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sConfigOC.OCMode = TIM_OCMODE_PWM1;
+  sConfigOC.Pulse = 0;
+  sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
+  sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
+  if (HAL_TIM_PWM_ConfigChannel(&htim3, &sConfigOC, TIM_CHANNEL_1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM3_Init 2 */
+
+  /* USER CODE END TIM3_Init 2 */
+  HAL_TIM_MspPostInit(&htim3);
+
+}
+
+/**
   * @brief USART2 Initialization Function
   * @param None
   * @retval None
@@ -479,6 +530,39 @@ static void MX_USART2_UART_Init(void)
   /* USER CODE BEGIN USART2_Init 2 */
 
   /* USER CODE END USART2_Init 2 */
+
+}
+
+/**
+  * @brief USART3 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_USART3_UART_Init(void)
+{
+
+  /* USER CODE BEGIN USART3_Init 0 */
+
+  /* USER CODE END USART3_Init 0 */
+
+  /* USER CODE BEGIN USART3_Init 1 */
+
+  /* USER CODE END USART3_Init 1 */
+  huart3.Instance = USART3;
+  huart3.Init.BaudRate = 9600;
+  huart3.Init.WordLength = UART_WORDLENGTH_8B;
+  huart3.Init.StopBits = UART_STOPBITS_1;
+  huart3.Init.Parity = UART_PARITY_NONE;
+  huart3.Init.Mode = UART_MODE_TX_RX;
+  huart3.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+  huart3.Init.OverSampling = UART_OVERSAMPLING_16;
+  if (HAL_UART_Init(&huart3) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN USART3_Init 2 */
+
+  /* USER CODE END USART3_Init 2 */
 
 }
 
@@ -542,163 +626,105 @@ static void MX_GPIO_Init(void)
 
 /* USER CODE BEGIN 4 */
 
-
-
-void MPU6050Read(void)
-{
-  ///////////////////////////склейка/////////////////
-	int16_t AccelX = (int16_t)(mpuData[0] << 8 | mpuData[1]);
-	int16_t AccelY = (int16_t)(mpuData[2] << 8 | mpuData[3]);
-	int16_t AccelZ = (int16_t)(mpuData[4] << 8 | mpuData[5]);
-	int16_t GyroX = (int16_t)(mpuData[8] << 8 | mpuData[9]);
-	int16_t GyroY = (int16_t)(mpuData[10] << 8 | mpuData[11]);
-	int16_t GyroZ = (int16_t)(mpuData[12] << 8 | mpuData[13]);
-/////////////////////////////обработка////////////////////
-    float accel_x = AccelX / 8192.0f;
-    float accel_y = AccelY / 8192.0f;
-    float accel_z = AccelZ / 8192.0f;
-    float gyro_x = GyroX / 939.650784f;
-    float gyro_y = GyroY / 939.650784f;
-    float gyro_z = GyroZ / 939.650784f;
- /////////////////////////вычисление////////////////////
-    MadgwickAHRSupdateIMU(gyro_z, gyro_y, -gyro_x, accel_z, accel_y, -accel_x);
-    pitch = (asinf(-2.f * (q1*q3 - q2*q0))) * 100000 + 5500;
-}
-
-void angleRegulation() {
-    angErr = pitch + setAng;
-    filtAngErr = (1 - ANG_DIFF_FILT)*prevAngErr + ANG_DIFF_FILT*angErr;
-    prevAngErr = filtAngErr;
-
-    Pa = angErr;
-    Ia = Ia + (angErr * dt);
-    if (Ia > 700) {
-    	Ia = 700;
-    }
-    if (Ia < -700) {
-    	Ia = -700;
-    }
-    Da = (filtAngErr - prevFiltAngErr) / dt;
-    prevFiltAngErr = filtAngErr;
-    if (angErr > MAX_ANGLE || angErr < -MAX_ANGLE) {
-    	speed = 0;
-    	return;
-    }
-
-    speed = ((int)(Pa*kp) + (int)(Ia*ki) + (int)(Da*kd)) / 10;
-
-}
-
-void speedRegulation() {
-	filtSpeed = (1-SPEED_FILT)*prevSpeed + SPEED_FILT*speed;
-	prevSpeed = filtSpeed;
-	speedErr = filtSpeed - setSpeed;
-	Pv = speedErr;
-	Dv = speedErr - prevSpeedErr;
-	prevSpeedErr = speedErr;
-	Iv += speed - setSpeed;
-
-	setAng = Pv*kpv + Iv*kiv + Dv*kdv;
-}
-
-void stepper_motor()
-{
-	if (speed > 3500) {
-		speed = 3500;
-	}
-	if (speed < -3500) {
-		speed = -3500;
-	}
-	if (speed == 0) {
-		return;
-	} else if (speed > 0) {
-		HAL_GPIO_WritePin(DIR1_GPIO_Port, DIR1_Pin, GPIO_PIN_SET);
-		HAL_GPIO_WritePin(DIR2_GPIO_Port, DIR2_Pin, GPIO_PIN_SET);
-		period = 65000/speed;
-	} else {
-		HAL_GPIO_WritePin(DIR1_GPIO_Port, DIR1_Pin, GPIO_PIN_RESET);
-		HAL_GPIO_WritePin(DIR2_GPIO_Port, DIR2_Pin, GPIO_PIN_RESET);
-		period = -65000/speed;
-	}
-	HAL_GPIO_WritePin(EN1_GPIO_Port, EN1_Pin, GPIO_PIN_RESET);
-	HAL_GPIO_WritePin(EN2_GPIO_Port, EN2_Pin, GPIO_PIN_RESET);
-	pwm = period / 2;
-
-    TIM1->ARR = period;
-}
-
-
 void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim)
 {
-        if(htim->Instance == TIM2)
-        {
-           HAL_I2C_Mem_Read_DMA(&hi2c1, MPU6050_Address, ACCEL_XOUT_H_REG, 1, mpuData, 14);
-           counter++;
-           if (counter > 150) {
-        	   HAL_ADCEx_InjectedStart_IT(&hadc1);
-        	   counter = 0;
-           }
+	if(htim->Instance == TIM2) {
+		HAL_I2C_Mem_Read_DMA(&hi2c1, MPU6050_Address, ACCEL_XOUT_H_REG, 1, mpuData, 14);
+        speedCounter++;
+        turnCounter++;
+        adcCounter++;
+        if (speedCounter > 50){
+        	setSpeed = 0;
+            speedCounter = 0;
         }
+        if (turnCounter > 50){
+        	turn = 0;
+        	turnCounter = 0;
+        }
+        if (adcCounter > 150) {
+        HAL_ADCEx_InjectedStart_IT(&hadc1);
+        adcCounter = 0;
+        }
+	}
 }
 
 void HAL_ADCEx_InjectedConvCpltCallback(ADC_HandleTypeDef* hadc1)
 {
-  kp = (float)HAL_ADCEx_InjectedGetValue(hadc1, ADC_INJECTED_RANK_1) / 1000;
-  ki = HAL_ADCEx_InjectedGetValue(hadc1, ADC_INJECTED_RANK_2) / 50;
-  kd = (float)HAL_ADCEx_InjectedGetValue(hadc1, ADC_INJECTED_RANK_3) / 2000;
+  //kp = (float)HAL_ADCEx_InjectedGetValue(hadc1, ADC_INJECTED_RANK_1) / 1000;
+  //ki = HAL_ADCEx_InjectedGetValue(hadc1, ADC_INJECTED_RANK_2) / 50;
+  //kd = (float)HAL_ADCEx_InjectedGetValue(hadc1, ADC_INJECTED_RANK_3) / 2000;
   //kpv = (float)HAL_ADCEx_InjectedGetValue(hadc1, ADC_INJECTED_RANK_1) / 200;
   //kiv = (float)HAL_ADCEx_InjectedGetValue(hadc1, ADC_INJECTED_RANK_2) / 25000;
-  //kdv = (float)HAL_ADCEx_InjectedGetValue(hadc1, ADC_INJECTED_RANK_3) / 50;
+  //kdv = (float)HAL_ADCEx_InjectedGetValue(hadc1, ADC_INJECTED_RANK_3) / 10;
 }
 
 void HAL_I2C_MemRxCpltCallback(I2C_HandleTypeDef *hi2c)
 {
-	  MPU6050Read();
-	  angleRegulation();
-	  stepper_motor();
-	  if (counter2 < 2100) {
-		  counter2++;
+	  pitch = MPU6050Read(mpuData);
+	  if (startCounter < 2100) {
+		  startCounter++;
+	  }
+	  if (startCounter > 500 && pitch > -1000) {
+		  isOn = 1;
+	  }
+	  if (isOn) {
+		  speed = angleRegulation(pitch, setAng);
+		  stepperMotor(speed, turn);
+		  int filtSetSpeed = (1-SET_SPEED_FILT)*prevSetSpeed + SET_SPEED_FILT*setSpeed;
+		  prevSetSpeed = filtSetSpeed;
+	 	  setAng = speedRegulation(speed, filtSetSpeed);
 	  }
 
-	  if (counter2 > 1000) {
-		  speedRegulation();
-	  }
-
-	  sprintf(uartMsg, "$%d %d %d, %d;", (int)(Pa*kp), (int)(Ia*ki), (int)(Da*kd), (int)(filtAngErr));
-	  //sprintf(uartMsg, "$%d %d %d, %d;", (int)(Pv*kpv), (int)(Iv*kiv), (int)(Dv*kdv), (int)(filtSpeed));
-	  //sprintf(msg, "$%.3f %d %.3f;", (float)(kp), (int)(ki), (float)(kd));
+	  //sprintf(uartMsg, "$%d;", (int)(prevSetSpeed));
+	  //sprintf(uartMsg, "$%d %d %d, %d;", (int)(Pa*kp), (int)(Ia*ki), (int)(Da*kd), (int)(speed));
+	  //sprintf(uartMsg, "$%d %d;", (int)(pitch/10), (int)(speed));
+	  //sprintf(uartMsg, "$%d %d %d, %d;", (int)(Pv*kpv), (int)(Iv), (int)(Dv*kdv), (int)(filtSpeed));
+	  //sprintf(uartMsg, "$%.3f %d %.3f;", (float)(kp), (int)(ki), (float)(kd));
 	  //sprintf(uartMsg, "$%.3f %.3f %.3f;", (float)(kpv), (float)(kiv), (float)(kdv));
-	  HAL_UART_Transmit(&huart2, (uint8_t*)uartMsg, sizeof(uartMsg), HAL_MAX_DELAY);
-	  HAL_UART_Transmit(&huart2, (uint8_t*)"\n", sizeof("\n"), HAL_MAX_DELAY);
+	  //HAL_UART_Transmit(&huart2, (uint8_t*)uartMsg, sizeof(uartMsg), HAL_MAX_DELAY);
+	  //HAL_UART_Transmit(&huart2, (uint8_t*)"\n", sizeof("\n"), HAL_MAX_DELAY);
 
 }
 
-void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
-	if (htim->Instance == TIM1)
-	{
-		htim1.Instance->CCR3 = pwm;
-		htim1.Instance->CCR2 = pwm;
-	}
+  if(huart->Instance==USART3)
+  {
+	//sprintf(uartMsg, "%d", (int)rxData);
+	  //sprintf(uartMsg, "%d", (int)rxData);
+	//int str = atoi(rxData);
+	//sprintf(uartMsg, "%d", str);
+	//HAL_UART_Transmit(&huart2, rxData, 1, HAL_MAX_DELAY);
+	//HAL_UART_Transmit(&huart3, rxData, 1, HAL_MAX_DELAY);
+	//HAL_UART_Transmit(&huart2, (uint8_t*)"\n", sizeof("\n"), HAL_MAX_DELAY);
+    if(rxData==70) // Ascii value of 'N' is 78 (N for NO)
+    {
+    	setSpeed = 1000;
+    	//HAL_UART_Transmit(&huart2, (uint8_t*)"F\n", sizeof("F\n"), HAL_MAX_DELAY);
+    	speedCounter = 0;
+    }
+    else if (rxData==66) // Ascii value of 'Y' is 89 (Y for YES)
+    {
+    	setSpeed = -1000;
+    	//HAL_UART_Transmit(&huart2, (uint8_t*)"B\n", sizeof("B\n"), HAL_MAX_DELAY);
+    	speedCounter = 0;
+    }
+    else if (rxData==50) // Ascii value of 'Y' is 89 (Y for YES)
+    	{
+           	turn = -200;
+           	//HAL_UART_Transmit(&huart2, (uint8_t*)"L\n", sizeof("L\n"), HAL_MAX_DELAY);
+           	turnCounter = 0;
+        }
+    else if (rxData==49) // Ascii value of 'Y' is 89 (Y for YES)
+    	{
+           	turn = 200;
+           	//HAL_UART_Transmit(&huart2, (uint8_t*)"R\n", sizeof("R\n"), HAL_MAX_DELAY);
+           	turnCounter = 0;
+    	}
+        HAL_UART_Receive_IT(&huart3, &rxData, 1); // Enabling interrupt receive again
+  }
 }
 
-void InitMPU6050(void) {
-        uint8_t mpuData;
-        mpuData = 0;
-        HAL_I2C_Mem_Write(&hi2c1, MPU6050_Address, 0x6B, 1, &mpuData, 1, 500); //dont sleep
-
-        mpuData = 0x15;
-        HAL_I2C_Mem_Write(&hi2c1, MPU6050_Address, 0x19, 1, &mpuData, 1, 500); //  sample rate = 8kHz / 16 = 500Hz
-
-        mpuData = 0x18;
-        HAL_I2C_Mem_Write(&hi2c1, MPU6050_Address, 0x1B, 1, &mpuData, 1, 500); //  gyro full scale = +/- 2000dps
-
-        mpuData = 0x08;
-        HAL_I2C_Mem_Write(&hi2c1, MPU6050_Address, 0x1C, 1, &mpuData, 1, 500); //  accelerometer full scale = +/- 4g
-
-        mpuData = 0x01;
-        HAL_I2C_Mem_Write(&hi2c1, MPU6050_Address, 0x38, 1, &mpuData, 1, 500); //  enable INTA interrupt*/
-}
 
 /* USER CODE END 4 */
 
